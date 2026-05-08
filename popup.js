@@ -101,13 +101,28 @@ function resolvePath(path, ctx) {
   return path;
 }
 
+const CARET_SVG =
+  '<svg class="icon section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+
+function sectionIconHTML(name) {
+  const path = (typeof ICONS !== "undefined" && ICONS[name]) ? ICONS[name] : null;
+  if (!path) return '';
+  return `<svg class="icon section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+}
+
+function itemIconHTML(name) {
+  const path = (typeof ICONS !== "undefined" && ICONS[name]) ? ICONS[name] : null;
+  if (!path) return '';
+  return `<svg class="icon item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+}
+
 function renderSections(origin, ctx, opener) {
   const root = document.getElementById("sections");
   root.innerHTML = "";
 
   for (const section of SECTIONS) {
     const resolved = section.items
-      .map((it) => ({ label: it.label, path: resolvePath(it.path, ctx) }))
+      .map((it) => ({ label: it.label, icon: it.icon, path: resolvePath(it.path, ctx) }))
       .filter((it) => it.path);
 
     if (resolved.length === 0) continue;
@@ -117,8 +132,7 @@ function renderSections(origin, ctx, opener) {
 
     const header = document.createElement("button");
     header.className = "section-header";
-    header.style.setProperty("--bg", section.color);
-    header.innerHTML = `<span>${section.title}</span><span>▾</span>`;
+    header.innerHTML = `${sectionIconHTML(section.icon)}<span class="section-title">${section.title}</span>${CARET_SVG}`;
     header.addEventListener("click", () => wrap.classList.toggle("collapsed"));
     wrap.appendChild(header);
 
@@ -127,7 +141,7 @@ function renderSections(origin, ctx, opener) {
     for (const item of resolved) {
       const btn = document.createElement("button");
       btn.className = "item";
-      btn.innerHTML = `${item.label}<span class="path">${item.path}</span>`;
+      btn.innerHTML = `${itemIconHTML(item.icon)}<span class="item-text"><span class="item-label">${item.label}</span><span class="path">${item.path}</span></span>`;
       btn.addEventListener("click", () => openInNewTab(origin + item.path, opener));
       body.appendChild(btn);
     }
