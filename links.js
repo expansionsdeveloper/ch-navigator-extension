@@ -34,6 +34,21 @@ const SECTIONS = [
     ],
   },
   {
+    title: "Navigation",
+    icon: "grid",
+    defaultCollapsed: true,
+    items: [
+      { label: "My user details",       icon: "user",         path: (c) => c.userId ? `/en-us/admin/user/${c.userId}` : null },
+      { label: "All users",             icon: "users",        path: "/en-us/admin/usrmgt?tab9601=Users" },
+      { label: "User groups",           icon: "usersGroup",   path: "/en-us/admin/usrmgt?tab9601=Usergroups" },
+      { label: "User logs",             icon: "logTree",      path: "/en-us/admin/usrmgt?tab9601=Userlogs" },
+      { label: "Raw audit page",        icon: "fileSearch",   path: "/en-us/admin/audit-raw" },
+      { label: "Definition management", icon: "schema",       path: "/en-us/admin/definitionmgmt" },
+      { label: "Entity management",     icon: "grid",         path: "/en-us/admin/entitymgmt" },
+      { label: "Import / Export",       icon: "arrowsUpDown", path: "/en-us/admin/importexport" },
+    ],
+  },
+  {
     title: "Configurations",
     icon: "gear",
     defaultCollapsed: true,
@@ -41,7 +56,7 @@ const SECTIONS = [
       { label: "Actions",  icon: "play", path: "/en-us/admin/actions" },
       { label: "Scripts",  icon: "code", path: "/en-us/admin/scripts" },
       { label: "Triggers", icon: "zap",  path: "/en-us/admin/triggers" },
-      { label: "Settings", icon: "gear", path: "/en-us/admin/settings" },
+      { label: "Settings", icon: "gear", path: "/en-us/admin/settingmanagement" },
     ],
   },
   {
@@ -61,22 +76,6 @@ const SECTIONS = [
       { label: "Scripting (scroll)",   icon: "code",      path: (c) => c.entityId ? `/api/audit/scripting/scroll/${c.entityId}` : null },
       { label: "Business (query)",     icon: "briefcase", path: (c) => c.entityId ? `/api/audit/business/query/${c.entityId}` : null },
       { label: "Business (scroll)",    icon: "briefcase", path: (c) => c.entityId ? `/api/audit/business/scroll/${c.entityId}` : null },
-    ],
-  },
-  {
-    title: "Navigation",
-    icon: "grid",
-    defaultCollapsed: true,
-    items: [
-      { label: "My user details",       icon: "user",         path: (c) => c.userId ? `/en-us/admin/user/${c.userId}` : null },
-      { label: "All users",             icon: "users",        path: "/en-us/admin/usrmgt?tab9601=Users" },
-      { label: "User groups",           icon: "usersGroup",   path: "/en-us/admin/usrmgt?tab9601=Usergroups" },
-      { label: "User logs",             icon: "logTree",      path: "/en-us/admin/usrmgt?tab9601=Userlogs" },
-      { label: "Raw audit page",        icon: "fileSearch",   path: "/en-us/admin/audit-raw" },
-      { label: "Definition management", icon: "schema",       path: "/en-us/admin/definitionmgmt" },
-      { label: "Entity management",     icon: "grid",         path: "/en-us/admin/entitymgmt" },
-      { label: "Import / Export",       icon: "arrowsUpDown", path: "/en-us/admin/import-export" },
-      { label: "Login - Form",          icon: "key",          path: "/en-us/login" },
     ],
   },
   {

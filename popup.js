@@ -1,8 +1,46 @@
 // Cache in chrome.storage.local (survives service-worker restarts; requires "storage" permission).
 // TTL prevents serving indefinitely stale data across long sessions.
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const FAV_KEY = "favorites_v1";
 
 const _local = chrome.storage?.local;
+
+async function getFavorites() {
+  if (!_local) return new Set();
+  try {
+    const res = await _local.get(FAV_KEY);
+    return new Set(res[FAV_KEY] || []);
+  } catch { return new Set(); }
+}
+
+function saveFavorites(set) {
+  if (!_local) return;
+  _local.set({ [FAV_KEY]: [...set] }).catch(() => { /* non-fatal */ });
+}
+
+function slugify(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+function itemId(sectionTitle, label) {
+  return `${slugify(sectionTitle)}:${slugify(label)}`;
+}
+
+function buildFavoritesSection(favorites) {
+  const items = [];
+  for (const section of SECTIONS) {
+    for (const item of section.items) {
+      const id = itemId(section.title, item.label);
+      if (favorites.has(id)) items.push(item);
+    }
+  }
+  return {
+    title: "Favourites",
+    icon: "star",
+    defaultCollapsed: false,
+    isFavorites: true,
+    items,
+  };
+}
 
 async function getPageCache(tabId, tabUrl) {
   if (!_local) return null;
@@ -116,19 +154,72 @@ function itemIconHTML(name) {
   return `<svg class="icon item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
 
-function renderSections(origin, ctx, opener) {
+function starButtonHTML(id, starred) {
+  const cls = starred ? "star starred" : "star";
+  const aria = starred ? "Remove from favourites" : "Add to favourites";
+  return `<button class="${cls}" data-fav-id="${id}" aria-label="${aria}" title="${aria}">${iconSVG("star")}</button>`;
+}
+
+function captureCollapsed() {
+  const state = {};
+  for (const sec of document.querySelectorAll("#sections .section")) {
+    const t = sec.dataset.title;
+    if (t) state[t] = sec.classList.contains("collapsed");
+  }
+  return state;
+}
+
+let _renderState = null; // { origin, ctx, opener, favorites }
+
+function renderSections(origin, ctx, opener, favorites) {
+  _renderState = { origin, ctx, opener, favorites };
+  const prevCollapsed = captureCollapsed();
   const root = document.getElementById("sections");
   root.innerHTML = "";
 
-  for (const section of SECTIONS) {
+  const favSection = buildFavoritesSection(favorites);
+  const sectionsToRender = [favSection, ...SECTIONS];
+
+  // Pass 1: resolve every section so we know which are actually visible.
+  const visibleSections = [];
+  for (const section of sectionsToRender) {
     const resolved = section.items
-      .map((it) => ({ label: it.label, icon: it.icon, path: resolvePath(it.path, ctx) }))
+      .map((it) => ({
+        id: itemId(section.isFavorites ? findOriginSectionTitle(it) : section.title, it.label),
+        label: it.label,
+        icon: it.icon,
+        path: resolvePath(it.path, ctx),
+      }))
       .filter((it) => it.path);
-
     if (resolved.length === 0) continue;
+    visibleSections.push({ section, resolved });
+  }
 
+  // Pass 2: assign default open/collapsed state by *visible position*.
+  // - Favourites (when visible): open. All other sections: collapsed.
+  // - No favourites: first 2 visible non-favourite sections open, rest collapsed.
+  // The user's manual toggles within this session still win (prevCollapsed) below.
+  const hasVisibleFavs = visibleSections.some((v) => v.section.isFavorites);
+  let openedNonFav = 0;
+  for (const entry of visibleSections) {
+    if (entry.section.isFavorites) {
+      entry.collapsedByDefault = false;
+    } else if (hasVisibleFavs) {
+      entry.collapsedByDefault = true;
+    } else if (openedNonFav < 2) {
+      entry.collapsedByDefault = false;
+      openedNonFav++;
+    } else {
+      entry.collapsedByDefault = true;
+    }
+  }
+
+  // Pass 3: render.
+  for (const { section, resolved, collapsedByDefault } of visibleSections) {
     const wrap = document.createElement("section");
-    wrap.className = section.defaultCollapsed ? "section collapsed" : "section";
+    const collapsed = (section.title in prevCollapsed) ? prevCollapsed[section.title] : collapsedByDefault;
+    wrap.className = collapsed ? "section collapsed" : "section";
+    wrap.dataset.title = section.title;
 
     const header = document.createElement("button");
     header.className = "section-header";
@@ -139,15 +230,44 @@ function renderSections(origin, ctx, opener) {
     const body = document.createElement("div");
     body.className = "section-body";
     for (const item of resolved) {
+      const row = document.createElement("div");
+      row.className = "item-row";
+
       const btn = document.createElement("button");
       btn.className = "item";
       btn.innerHTML = `${itemIconHTML(item.icon)}<span class="item-text"><span class="item-label">${item.label}</span><span class="path">${item.path}</span></span>`;
       btn.addEventListener("click", () => openInNewTab(origin + item.path, opener));
-      body.appendChild(btn);
+      row.appendChild(btn);
+
+      row.insertAdjacentHTML("beforeend", starButtonHTML(item.id, favorites.has(item.id)));
+      const starEl = row.lastElementChild;
+      starEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleFavorite(item.id);
+      });
+
+      body.appendChild(row);
     }
     wrap.appendChild(body);
     root.appendChild(wrap);
   }
+}
+
+// Used by the synthetic Favourites section to preserve a stable id that maps
+// back to the original section/label.
+function findOriginSectionTitle(item) {
+  for (const section of SECTIONS) {
+    if (section.items.includes(item)) return section.title;
+  }
+  return "Favourites";
+}
+
+function toggleFavorite(id) {
+  if (!_renderState) return;
+  const { origin, ctx, opener, favorites } = _renderState;
+  if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
+  saveFavorites(favorites);
+  renderSections(origin, ctx, opener, favorites);
 }
 
 function renderStatusBar(statusData, definitionName) {
@@ -155,18 +275,34 @@ function renderStatusBar(statusData, definitionName) {
   if (!bar || !statusData) return;
 
   const label = statusData.aggregated_service_status_label || "Unknown";
-  const version = (statusData.product_version || "").slice(0, 7);
   const buildDate = statusData.build_date
     ? new Date(statusData.build_date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
     : "";
 
   const dotColors = { Green: "#16A34A", Red: "#DC2626", Orange: "#EA580C", Yellow: "#CA8A04" };
   const dotColor = dotColors[label] || "#888";
-  const tooltip = `System status: ${label}. Aggregated from all service health checks (queues, jobs, storage, search, graph, publishing, and more).`;
+
+  const tooltip = `
+    <div class="tt-title">System status — currently <span style="color:${dotColor}">${label}</span></div>
+    <div class="tt-body">
+      Aggregated from individual service health checks. The dot shows the
+      <em>worst</em> status across all tracked services.
+    </div>
+    <ul class="tt-legend">
+      <li><span class="tt-dot" style="background:#16A34A"></span><b>Green</b> — Healthy</li>
+      <li><span class="tt-dot" style="background:#CA8A04"></span><b>Yellow</b> — Warnings</li>
+      <li><span class="tt-dot" style="background:#EA580C"></span><b>Orange</b> — Degraded</li>
+      <li><span class="tt-dot" style="background:#DC2626"></span><b>Red</b> — Critical</li>
+    </ul>
+    <div class="tt-foot">Tracked: queues · jobs · data/media storage · search · graph · publishing · video indexing.</div>
+  `;
 
   bar.innerHTML = `
-    <span class="status-dot" style="background:${dotColor}" title="${tooltip}"></span>
-    <span class="status-label" title="${tooltip}">System status</span>
+    <span class="status-info" tabindex="0" aria-describedby="status-tooltip">
+      <span class="status-dot" style="background:${dotColor}"></span>
+      <span class="status-label">System status</span>
+      <span id="status-tooltip" role="tooltip" class="status-tooltip">${tooltip}</span>
+    </span>
     ${definitionName ? `<span class="status-sep">·</span><span class="status-meta">Entity Definition: ${definitionName}</span>` : ""}
     ${buildDate ? `<span class="status-sep">·</span><span class="status-meta">Build Date: ${buildDate}</span>` : ""}
   `;
@@ -196,6 +332,8 @@ async function init() {
 
   tenantEl.textContent = "Loading…";
 
+  const favorites = await getFavorites();
+
   try {
     // Serve from cache if the tab URL hasn't changed
     const cached = await getPageCache(tab.id, tab.url);
@@ -212,9 +350,15 @@ async function init() {
       if (cached.definitionName) ctx.definitionName = cached.definitionName;
       if (cached.isAsset) ctx.isAsset = true;
       renderStatusBar(cached.statusData, ctx.definitionName);
+      if (!cached.profile) {
+        sectionsEl.classList.add("hidden");
+        tenantEl.classList.add("hidden");
+        if (typeof renderBanners === "function") renderBanners();
+        return;
+      }
       const cachedLabel = buildTenantLabel(ctx);
       if (cachedLabel) { tenantEl.textContent = cachedLabel; } else { tenantEl.classList.add("hidden"); }
-      renderSections(url.origin, ctx, tab);
+      renderSections(url.origin, ctx, tab, favorites);
       if (typeof renderBanners === "function") renderBanners();
       return;
     }
@@ -257,9 +401,15 @@ async function init() {
     });
 
     renderStatusBar(statusData, ctx.definitionName);
+    if (!profile) {
+      sectionsEl.classList.add("hidden");
+      tenantEl.classList.add("hidden");
+      if (typeof renderBanners === "function") renderBanners();
+      return;
+    }
     const freshLabel = buildTenantLabel(ctx);
     if (freshLabel) { tenantEl.textContent = freshLabel; } else { tenantEl.classList.add("hidden"); }
-    renderSections(url.origin, ctx, tab);
+    renderSections(url.origin, ctx, tab, favorites);
     if (typeof renderBanners === "function") renderBanners();
 
   } catch (err) {
