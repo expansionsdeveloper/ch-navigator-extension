@@ -139,6 +139,97 @@ function resolvePath(path, ctx) {
   return path;
 }
 
+// Named action handlers. Action items in links.js reference these by actionName,
+// so links.js stays pure data (no chrome.* calls; remains testable in Jest).
+const ACTIONS = {
+  async editThisPage(tab, origin, opener) {
+    let id = null;
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const w = window;
+          const fromReact = w.PAGE_OPTIONS && w.PAGE_OPTIONS.id;
+          if (fromReact != null) return String(fromReact);
+          const fromKnockout = (w.Page && w.Page.options && w.Page.options.id) || (w.Page && w.Page.id);
+          if (fromKnockout != null) return String(fromKnockout);
+          for (const s of Array.from(document.scripts)) {
+            const src = s.innerHTML || "";
+            const hasMarker =
+              src.indexOf("window.PAGE_OPTIONS") > -1 ||
+              src.indexOf("window.Page = (window.api") > -1 ||
+              src.indexOf("var options =") > -1;
+            if (!hasMarker) continue;
+            const m = src.match(/["']?\bid["']?\s*:\s*["']?([A-Za-z0-9_-]+)["']?/);
+            if (m) return m[1];
+          }
+          return null;
+        },
+      });
+      id = res && res.result;
+    } catch { /* fall through */ }
+    if (!id) {
+      return { success: false, message: "Could not determine the current page id. Are you on a Content Hub page?" };
+    }
+    openInNewTab(`${origin}/en-us/admin/page/${id}`, opener);
+    return { success: true, message: `Opening page ${id}…` };
+  },
+
+  async clearAllCache(tab) {
+    let ok = false;
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: async () => {
+          try {
+            const tokenEl = document.getElementsByName("__RequestVerificationToken")[0];
+            const token = tokenEl && tokenEl.defaultValue;
+            const r = await fetch("/api/cache/all", {
+              method: "DELETE",
+              credentials: "include",
+              headers: token ? { "x-requested-by": token } : undefined,
+            });
+            return r.ok;
+          } catch { return false; }
+        },
+      });
+      ok = !!(res && res.result);
+    } catch { /* fall through */ }
+    return ok
+      ? { success: true, message: "The application cache was cleared successfully." }
+      : { success: false, message: "Failed to clear the cache." };
+  },
+};
+
+let _toastTimer = null;
+function showToast(result) {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  el.textContent = result.message;
+  el.className = `toast ${result.success ? "success" : "error"}`;
+  el.classList.remove("hidden");
+  if (_toastTimer) window.clearTimeout(_toastTimer);
+  _toastTimer = window.setTimeout(() => {
+    el.classList.add("hidden");
+    _toastTimer = null;
+  }, 4000);
+}
+
+async function runItemAction(item, tab, origin, opener) {
+  const handler = ACTIONS[item.actionName];
+  if (!handler) {
+    showToast({ success: false, message: `Unknown action: ${item.actionName}` });
+    return;
+  }
+  if (item.confirm && !window.confirm(item.confirm)) return;
+  try {
+    const r = await handler(tab, origin, opener);
+    showToast(r);
+  } catch (err) {
+    showToast({ success: false, message: err && err.message ? err.message : String(err) });
+  }
+}
+
 const CARET_SVG =
   '<svg class="icon section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
 
@@ -183,14 +274,16 @@ function renderSections(origin, ctx, opener, favorites) {
   // Pass 1: resolve every section so we know which are actually visible.
   const visibleSections = [];
   for (const section of sectionsToRender) {
-    const resolved = section.items
-      .map((it) => ({
-        id: itemId(section.isFavorites ? findOriginSectionTitle(it) : section.title, it.label),
-        label: it.label,
-        icon: it.icon,
-        path: resolvePath(it.path, ctx),
-      }))
-      .filter((it) => it.path);
+    const resolved = [];
+    for (const it of section.items) {
+      const id = itemId(section.isFavorites ? findOriginSectionTitle(it) : section.title, it.label);
+      if (it.type === "action") {
+        resolved.push({ id, label: it.label, icon: it.icon, type: "action", actionName: it.actionName, confirm: it.confirm });
+        continue;
+      }
+      const path = resolvePath(it.path, ctx);
+      if (path) resolved.push({ id, label: it.label, icon: it.icon, path });
+    }
     if (resolved.length === 0) continue;
     visibleSections.push({ section, resolved });
   }
@@ -235,8 +328,12 @@ function renderSections(origin, ctx, opener, favorites) {
 
       const btn = document.createElement("button");
       btn.className = "item";
-      btn.innerHTML = `${itemIconHTML(item.icon)}<span class="item-text"><span class="item-label">${item.label}</span><span class="path">${item.path}</span></span>`;
-      btn.addEventListener("click", () => openInNewTab(origin + item.path, opener));
+      btn.innerHTML = `${itemIconHTML(item.icon)}<span class="item-text"><span class="item-label">${item.label}</span></span>`;
+      if (item.type === "action") {
+        btn.addEventListener("click", () => runItemAction(item, opener, origin, opener));
+      } else {
+        btn.addEventListener("click", () => openInNewTab(origin + item.path, opener));
+      }
       row.appendChild(btn);
 
       row.insertAdjacentHTML("beforeend", starButtonHTML(item.id, favorites.has(item.id)));

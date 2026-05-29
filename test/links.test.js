@@ -68,18 +68,30 @@ describe("Current entity — non-asset entity", () => {
   const ctx = { entityId: "100", isAsset: false, definitionName: "M.Job" };
   const visible = resolveItems(sectionByTitle("Current entity"), ctx);
 
-  test("Entity (REST) is visible", () => expect(visible).toContain("Entity (REST)"));
-  test("Renditions not visible", () => expect(visible).not.toContain("Renditions"));
-  test("Rendition count not visible", () => expect(visible).not.toContain("Rendition count"));
+  test("Entity is visible", () => expect(visible).toContain("Entity"));
 });
 
 describe("Current entity — asset entity", () => {
   const ctx = { entityId: "200", isAsset: true, definitionName: "M.Asset" };
   const visible = resolveItems(sectionByTitle("Current entity"), ctx);
 
-  test("Entity (REST) is visible", () => expect(visible).toContain("Entity (REST)"));
-  test("Renditions is visible", () => expect(visible).toContain("Renditions"));
-  test("Rendition count is visible", () => expect(visible).toContain("Rendition count"));
+  test("Entity is visible", () => expect(visible).toContain("Entity"));
+});
+
+describe("API Links (lists) — renditions live here now", () => {
+  test("Renditions hidden for non-asset", () => {
+    const ctx = { entityId: "100", isAsset: false };
+    const visible = resolveItems(sectionByTitle("API Links (lists)"), ctx);
+    expect(visible).not.toContain("Renditions");
+    expect(visible).not.toContain("Rendition count");
+  });
+
+  test("Renditions visible for asset", () => {
+    const ctx = { entityId: "200", isAsset: true };
+    const visible = resolveItems(sectionByTitle("API Links (lists)"), ctx);
+    expect(visible).toContain("Renditions");
+    expect(visible).toContain("Rendition count");
+  });
 });
 
 // ─── Audit section — operational audit gate ──────────────────────────────────
@@ -124,7 +136,7 @@ describe("Current definition — visible when definitionName is set", () => {
   const visible = resolveItems(sectionByTitle("Current definition"), ctx);
 
   test("shows definition links", () => expect(visible.length).toBeGreaterThan(0));
-  test("contains Definition by name", () => expect(visible).toContain("Definition by name (REST)"));
+  test("contains Definition by name", () => expect(visible).toContain("Definition by name"));
 });
 
 describe("Current definition — hidden without definitionName", () => {
@@ -147,6 +159,28 @@ describe("Status section — always visible (static paths)", () => {
 });
 
 // ─── Navigation section ──────────────────────────────────────────────────────
+
+// ─── Configurations — action items ───────────────────────────────────────────
+
+describe("Configurations — action items", () => {
+  const cfg = sectionByTitle("Configurations");
+  const actions = cfg.items.filter((it) => it.type === "action");
+
+  test("Edit this page is the first item", () => {
+    expect(cfg.items[0].label).toBe("Edit this page");
+    expect(cfg.items[0].actionName).toBe("editThisPage");
+  });
+
+  test("Clear all cache is present with a confirm prompt", () => {
+    const clear = cfg.items.find((it) => it.actionName === "clearAllCache");
+    expect(clear).toBeDefined();
+    expect(typeof clear.confirm).toBe("string");
+  });
+
+  test("All action items have an actionName", () => {
+    for (const it of actions) expect(typeof it.actionName).toBe("string");
+  });
+});
 
 describe("Navigation — My user details requires userId", () => {
   test("hidden without userId", () => {
